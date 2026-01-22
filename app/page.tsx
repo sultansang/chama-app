@@ -11,12 +11,23 @@ import autoTable from "jspdf-autotable";
 // --- 🔒 CONSTANTS ---
 const PROFILE_URL = "/me.jpg";
 
+// --- ICONS (Inline SVGs) ---
+const MenuIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+);
+const CloseIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 18 12"/></svg>
+);
+
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState("Dashboard");
   const [authenticated, setAuthenticated] = useState(false);
   const [pin, setPin] = useState("");
   const [imgError, setImgError] = useState(false);
+
+  // --- MOBILE SIDEBAR STATE ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // --- LOADING & UI STATES ---
   const [isRegistering, setIsRegistering] = useState(false);
@@ -72,7 +83,7 @@ export default function Home() {
     if (mounted && authenticated) syncAllData();
   }, [mounted, authenticated, syncAllData]);
 
-  // Keep selected member fresh
+  // Keep selectedMember fresh
   useEffect(() => {
     if (selectedMember && members.length > 0) {
         const freshData = members.find((m) => m.id === selectedMember.id);
@@ -221,9 +232,10 @@ export default function Home() {
     const totalCr = crTrans.reduce((acc, t) => acc + Math.abs(t.amount), 0);
     
     const balance = totalDr - totalCr;
-    const finalTotal = Math.max(totalDr, totalCr);
+    // For T-Account balancing, the Grand Total is always the larger side
+    const grandTotal = Math.max(totalDr, totalCr); 
 
-    return { drTrans, crTrans, totalDr, totalCr, balance, finalTotal };
+    return { drTrans, crTrans, totalDr, totalCr, balance, grandTotal };
   };
 
   const ledger = getPresentationKPIs();
@@ -382,7 +394,7 @@ export default function Home() {
                                 </div>
                                 <div className="flex-1 px-4">
                                      <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${record.balanceRunning < 0 ? 'bg-red-900/20 text-red-400' : 'bg-green-900/20 text-green-400'}`}>
-                                         {record.balanceRunning < 0 ? `Deficit: ${Math.abs(record.balanceRunning)}` : 'Cleared / Surplus'}
+                                          {record.balanceRunning < 0 ? `Deficit: ${Math.abs(record.balanceRunning)}` : 'Cleared / Surplus'}
                                      </span>
                                 </div>
                                 {record.balanceRunning < 0 && record.isPast && (
@@ -401,18 +413,34 @@ export default function Home() {
     );
   }
 
-  // --- MAIN LAYOUT (DARK THEME) ---
+  // --- MAIN LAYOUT ---
   return (
     <main className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
       
-      {/* SIDEBAR */}
-      <div className="w-64 bg-[#051b11] flex flex-col border-r border-slate-800 shrink-0 z-20">
-        <div className="p-8">
+      {/* 1. MOBILE OVERLAY */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* 2. SIDEBAR */}
+      <aside className={`
+          fixed inset-y-0 left-0 z-50 w-64 bg-[#051b11] flex flex-col border-r border-slate-800 
+          transform transition-transform duration-300 ease-out
+          lg:translate-x-0 lg:static
+          ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}
+      `}>
+        <div className="p-8 flex justify-between items-center">
           <h1 className="text-white text-2xl font-black italic tracking-tighter uppercase">Chama<span className="text-[#006a33]">Pro</span></h1>
+          <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-white p-2">
+             <CloseIcon />
+          </button>
         </div>
         <nav className="flex-1 px-4 space-y-2">
           {["Dashboard", "Members", "Monthly Log", "Loan Manager", "Presentation"].map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
+            <button key={tab} onClick={() => { setActiveTab(tab); setIsSidebarOpen(false); }}
               className={`w-full flex items-center px-6 py-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                 activeTab === tab ? 'bg-[#006a33] text-white shadow-lg shadow-green-900/20 translate-x-2' : 'text-slate-500 hover:text-white hover:bg-white/5'
               }`}>
@@ -420,18 +448,26 @@ export default function Home() {
             </button>
           ))}
         </nav>
-      </div>
+      </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* 3. MAIN CONTENT */}
+      <div className="flex-1 flex flex-col min-w-0 bg-slate-950 relative z-0">
         {/* HEADER */}
-        <header className="h-20 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-8 flex justify-between items-center shrink-0">
-           <h2 className="text-slate-500 text-[10px] font-black uppercase tracking-[0.5em]">{activeTab} Terminal</h2>
+        <header className="h-20 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 px-6 lg:px-8 flex justify-between items-center shrink-0">
+           <div className="flex items-center gap-4">
+               {/* HAMBURGER MENU */}
+               <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden text-white bg-slate-800 p-2 rounded-lg hover:bg-slate-700">
+                  <MenuIcon />
+               </button>
+               <h2 className="text-slate-500 text-[10px] font-black uppercase tracking-[0.5em]">{activeTab} Terminal</h2>
+           </div>
+           
            <div className="h-8 w-8 rounded-full bg-slate-800 overflow-hidden border border-slate-700">
                 <img src={PROFILE_URL} alt="User" className="h-full w-full object-cover" onError={(e:any) => e.target.style.display='none'}/>
            </div>
         </header>
 
-        <div className="flex-1 p-8 overflow-y-auto">
+        <div className="flex-1 p-4 lg:p-8 overflow-y-auto">
           
           {/* DASHBOARD VIEW */}
           {activeTab === "Dashboard" && (
@@ -460,7 +496,7 @@ export default function Home() {
                         <p className="text-2xl font-mono text-slate-400">{format(today, 'eeee, do')}</p>
                     </div>
 
-                    <div className="relative z-10 text-right">
+                    <div className="relative z-10 text-right hidden md:block">
                         <div className={`inline-block px-6 py-2 rounded-full font-black uppercase text-xs mb-2 shadow-lg ${isSafeZone ? 'bg-green-900/30 text-green-400 border border-green-800' : 'bg-red-900/30 text-red-400 border border-red-800'}`}>
                             {isSafeZone ? 'Safe Zone (3rd - 25th)' : 'Due / Late Zone'}
                         </div>
@@ -490,7 +526,7 @@ export default function Home() {
                                         </p>
                                         <div className="bg-slate-950/50 p-1 rounded">
                                              <p className={`text-[10px] font-bold ${fin.netBalance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                 Bal: {fin.netBalance >= 0 ? '+' : ''}{fin.netBalance.toLocaleString()}
+                                                  Bal: {fin.netBalance >= 0 ? '+' : ''}{fin.netBalance.toLocaleString()}
                                              </p>
                                         </div>
                                     </div>
@@ -500,14 +536,14 @@ export default function Home() {
                     </div>
                 </div>
             </div>
-        )}
+          )}
 
           {/* MEMBERS VIEW */}
           {activeTab === "Members" && (
              <div className="space-y-6 animate-in slide-in-from-bottom-4">
                 <div className="bg-slate-900 p-6 rounded-[2rem] shadow-sm border border-slate-800 flex gap-4">
                    <input type="text" value={regName} onChange={(e) => setRegName(e.target.value)} 
-                        className="flex-1 bg-slate-950 border border-slate-800 text-white p-4 rounded-xl font-black uppercase text-xs outline-none focus:border-[#006a33]" placeholder="New Member Full Name" />
+                       className="flex-1 bg-slate-950 border border-slate-800 text-white p-4 rounded-xl font-black uppercase text-xs outline-none focus:border-[#006a33]" placeholder="New Member Full Name" />
                    <button onClick={async () => {
                        if(!regName) return;
                        setIsRegistering(true);
@@ -529,7 +565,7 @@ export default function Home() {
                                 <td className="p-6 pl-8 font-black uppercase text-slate-200">{m.member_name}</td>
                                 <td className="p-6">
                                     <span className={`px-3 py-1 rounded-lg text-[10px] font-black ${fin.netBalance >= 0 ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                                        {fin.netBalance >= 0 ? '+' : ''} KES {fin.netBalance.toLocaleString()}
+                                         {fin.netBalance >= 0 ? '+' : ''} KES {fin.netBalance.toLocaleString()}
                                     </span>
                                 </td>
                                 <td className="p-6 text-right"><span className="text-[10px] font-bold text-slate-500 uppercase group-hover:text-white">View Profile</span></td>
@@ -548,18 +584,18 @@ export default function Home() {
                 {/* INITIATION FORM */}
                 <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-[#006a33] shadow-lg shadow-green-900/10">
                    <h3 className="text-[#006a33] text-xs font-black uppercase mb-4 italic">Loan Initiation</h3>
-                   <div className="flex gap-4">
+                   <div className="flex flex-col md:flex-row gap-4">
                       <select value={loanMemberId} onChange={(e) => setLoanMemberId(e.target.value)} className="bg-slate-950 text-white border border-slate-800 p-4 rounded-xl font-black text-xs uppercase flex-1 outline-none focus:border-[#006a33]">
                           <option value="">Select Borrower</option>
                           {members.map(m => <option key={m.id} value={m.id}>{m.member_name}</option>)}
                       </select>
-                      <input type="number" placeholder="Principal Amount" value={loanPrincipal} onChange={(e) => setLoanPrincipal(e.target.value)} className="bg-slate-950 text-white border border-slate-800 p-4 rounded-xl font-black text-xs w-48 outline-none focus:border-[#006a33]" />
-                      <select value={loanDuration} onChange={(e) => setLoanDuration(e.target.value)} className="bg-slate-950 text-white border border-slate-800 p-4 rounded-xl font-black text-xs w-32 outline-none">
+                      <input type="number" placeholder="Principal Amount" value={loanPrincipal} onChange={(e) => setLoanPrincipal(e.target.value)} className="bg-slate-950 text-white border border-slate-800 p-4 rounded-xl font-black text-xs w-full md:w-48 outline-none focus:border-[#006a33]" />
+                      <select value={loanDuration} onChange={(e) => setLoanDuration(e.target.value)} className="bg-slate-950 text-white border border-slate-800 p-4 rounded-xl font-black text-xs w-full md:w-32 outline-none">
                           <option value="1">1 Month</option>
                           <option value="3">3 Months</option>
                           <option value="6">6 Months</option>
                       </select>
-                      <button onClick={initiateLoan} disabled={isDisbursing} className="bg-[#006a33] text-white px-8 rounded-xl font-black uppercase text-[10px] hover:bg-white hover:text-black transition-all">
+                      <button onClick={initiateLoan} disabled={isDisbursing} className="bg-[#006a33] text-white px-8 py-4 rounded-xl font-black uppercase text-[10px] hover:bg-white hover:text-black transition-all">
                         {isDisbursing ? "..." : "Disburse Loan"}
                       </button>
                    </div>
@@ -570,30 +606,27 @@ export default function Home() {
                    {loans.map(l => {
                       const totalDue = l.principal + (l.interest_accrued || 0);
                       const rate = l.principal > 0 ? ((l.interest_accrued / l.principal) * 100).toFixed(1) : 0;
-                      const totalRepaid = totalDue - l.amount; 
-
+                      
                       return (
-                          <div key={l.id} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-sm flex justify-between items-center hover:border-slate-600 transition-all">
-                             <div className="space-y-2 flex-1">
+                          <div key={l.id} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-sm flex flex-col lg:flex-row justify-between items-center hover:border-slate-600 transition-all gap-4">
+                             <div className="space-y-2 flex-1 w-full">
                                 <div>
                                     <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Borrower</p>
                                     <h4 className="text-xl font-black text-white uppercase">{l.members?.member_name || "Unknown Member"}</h4>
                                 </div>
-                                <div className="grid grid-cols-4 gap-6 text-[10px] text-slate-400 font-mono border-t border-slate-800 pt-3 mt-1">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-[10px] text-slate-400 font-mono border-t border-slate-800 pt-3 mt-1">
                                     <div><span className="block opacity-50 uppercase">Principal</span><span className="font-bold text-slate-200">KES {l.principal.toLocaleString()}</span></div>
-                                    <div><span className="block opacity-50 uppercase">Interest ({rate}%)</span><span className="font-bold text-slate-200">KES {l.interest_accrued.toLocaleString()}</span></div>
-                                    <div><span className="block opacity-50 uppercase text-green-500">Paid So Far</span><span className="font-black text-green-500">KES {totalRepaid.toLocaleString()}</span></div>
-                                    <div><span className="block opacity-50 uppercase text-red-400">Due Date</span><span className="text-red-400 font-bold">{l.due_date}</span></div>
+                                    <div><span className="block opacity-50 uppercase">Interest ({rate}%)</span><span className="font-bold text-red-400">KES {l.interest_accrued.toLocaleString()}</span></div>
+                                    <div><span className="block opacity-50 uppercase">Total Due</span><span className="font-bold text-white">KES {totalDue.toLocaleString()}</span></div>
+                                    <div><span className="block opacity-50 uppercase">Status</span><span className={`font-bold uppercase ${l.status === 'Paid' ? 'text-green-500' : 'text-blue-500'}`}>{l.status}</span></div>
                                 </div>
                              </div>
-                             <div className="text-right flex items-center gap-6 pl-8 border-l border-slate-800 ml-6">
-                                <div>
-                                    <p className="text-[9px] font-bold text-slate-500 uppercase">Remaining Balance</p>
-                                    <p className="text-2xl font-black text-white">KES {l.amount.toLocaleString()}</p>
-                                    <p className={`text-[9px] font-black uppercase ${l.status === 'Paid' ? 'text-green-500' : 'text-blue-500'}`}>{l.status}</p>
-                                </div>
+                             <div className="flex flex-col items-end gap-2 w-full lg:w-auto">
+                                <span className="text-xs font-black text-slate-500 uppercase">Balance: KES {l.amount.toLocaleString()}</span>
                                 {l.status !== 'Paid' && (
-                                    <button onClick={() => handleLoanRepayment(l.id, l.amount, l.members?.member_name || "Unknown")} className="bg-white text-black px-6 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-slate-200 transition-all">Repay</button>
+                                    <button onClick={() => handleLoanRepayment(l.id, l.amount, l.members?.member_name)} className="w-full lg:w-auto px-6 py-3 bg-white text-black font-black uppercase text-[10px] rounded-xl hover:bg-slate-200">
+                                        Repay
+                                    </button>
                                 )}
                              </div>
                           </div>
@@ -603,97 +636,97 @@ export default function Home() {
              </div>
           )}
 
-          {/* PRESENTATION / LEDGER VIEW (DARK MODE) */}
+          {/* --- PRESENTATION (LEDGER T-ACCOUNT STYLE) --- */}
           {activeTab === "Presentation" && (
-             <div className="space-y-6 animate-in zoom-in-95">
-                <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] shadow-sm border border-slate-800">
-                    <div className="flex items-center gap-4">
-                        <label className="text-[10px] font-black uppercase text-slate-400">Ledger Period:</label>
+             <div className="space-y-6 animate-in fade-in">
+                 
+                 {/* Top Controls */}
+                 <div className="flex justify-between items-end">
+                     <div>
+                        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mb-1">Ledger Period:</p>
                         <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} 
-                            className="bg-slate-950 text-white border border-slate-800 px-4 py-2 rounded-xl font-bold text-xs uppercase outline-none focus:border-white" />
-                    </div>
-                    <button onClick={handleDownloadMonthReport} className="bg-white text-black px-6 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-slate-200 transition-all">
-                        Download Ledger (PDF)
-                    </button>
-                </div>
+                             className="bg-black text-white p-3 rounded-xl text-xs font-bold uppercase border border-slate-700 outline-none focus:border-green-600"/>
+                     </div>
+                     <button onClick={handleDownloadMonthReport} className="bg-white text-black px-6 py-3 rounded-xl font-black uppercase text-[10px] hover:bg-slate-200">
+                             Download Ledger (PDF)
+                     </button>
+                 </div>
 
-                {/* LEDGER / T-ACCOUNT DESIGN */}
-                <div className="bg-slate-900 rounded-[2.5rem] shadow-xl overflow-hidden border border-slate-800">
-                    <div className="bg-black text-white p-6 text-center border-b border-slate-800">
-                        <h2 className="text-xl font-black uppercase tracking-widest text-[#006a33]">General Ledger</h2>
-                        <p className="text-xs opacity-50 font-mono mt-1">{reportMonth}</p>
-                    </div>
-                    
-                    <div className="flex flex-col md:flex-row min-h-[400px]">
-                        
-                        {/* DEBIT SIDE (INCOME) */}
-                        <div className="flex-1 border-r border-slate-800 flex flex-col">
-                            <div className="bg-green-950/20 p-4 border-b border-green-900/30 text-center">
-                                <h3 className="text-green-500 font-black text-xs uppercase">DR (Receipts / In)</h3>
-                            </div>
-                            <div className="flex-1 p-0">
-                                {ledger.drTrans.length === 0 ? (
-                                    <p className="text-center text-xs text-slate-700 italic mt-10">No Receipts</p>
-                                ) : (
-                                    ledger.drTrans.map(t => (
-                                        <div key={t.id} className="flex justify-between p-4 border-b border-slate-800 hover:bg-green-900/10 transition-colors">
-                                            <div>
-                                                <p className="text-[10px] text-slate-500 font-mono">{t.created_at.split('T')[0]}</p>
-                                                <p className="text-[10px] font-bold text-slate-300 uppercase">{t.description}</p>
-                                            </div>
-                                            <p className="text-xs font-black text-green-400">KES {t.amount.toLocaleString()}</p>
-                                        </div>
-                                    ))
-                                )}
-                                {/* BALANCING FIGURE */}
-                                {ledger.balance < 0 && (
-                                    <div className="flex justify-between p-4 bg-red-950/30 border-t border-dashed border-red-800 mt-auto">
-                                        <p className="text-[10px] font-black text-red-400 uppercase italic">Balance c/d (Overdraft)</p>
-                                        <p className="text-xs font-black text-red-400">KES {Math.abs(ledger.balance).toLocaleString()}</p>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="bg-black p-4 flex justify-between items-center mt-auto border-t border-slate-800">
-                                <p className="text-[10px] font-black uppercase text-slate-500">Total DR</p>
-                                <p className="text-sm font-black text-white">KES {ledger.finalTotal.toLocaleString()}</p>
-                            </div>
-                        </div>
+                 {/* THE T-ACCOUNT LEDGER */}
+                 <div className="bg-black/40 border border-slate-800 rounded-[2.5rem] overflow-hidden backdrop-blur-md shadow-2xl">
+                     
+                     {/* 1. TITLE HEADER */}
+                     <div className="bg-slate-900/80 p-8 text-center border-b border-slate-800">
+                        <h2 className="text-2xl font-black text-[#006a33] uppercase tracking-widest">General Ledger</h2>
+                        <p className="text-slate-400 font-mono text-sm mt-1">{reportMonth}</p>
+                     </div>
 
-                        {/* CREDIT SIDE (OUTFLOW) */}
-                        <div className="flex-1 flex flex-col">
-                            <div className="bg-red-950/20 p-4 border-b border-red-900/30 text-center">
-                                <h3 className="text-red-500 font-black text-xs uppercase">CR (Payments / Out)</h3>
-                            </div>
-                            <div className="flex-1 p-0">
-                                {ledger.crTrans.length === 0 ? (
-                                    <p className="text-center text-xs text-slate-700 italic mt-10">No Payments</p>
-                                ) : (
-                                    ledger.crTrans.map(t => (
-                                        <div key={t.id} className="flex justify-between p-4 border-b border-slate-800 hover:bg-red-900/10 transition-colors">
-                                            <div>
-                                                <p className="text-[10px] text-slate-500 font-mono">{t.created_at.split('T')[0]}</p>
-                                                <p className="text-[10px] font-bold text-slate-300 uppercase">{t.description}</p>
-                                            </div>
-                                            <p className="text-xs font-black text-red-500">KES {Math.abs(t.amount).toLocaleString()}</p>
-                                        </div>
-                                    ))
-                                )}
-                                {/* BALANCING FIGURE */}
-                                {ledger.balance >= 0 && (
-                                    <div className="flex justify-between p-4 bg-green-950/30 border-t border-dashed border-green-800 mt-auto">
-                                        <p className="text-[10px] font-black text-green-500 uppercase italic">Balance c/d (Cash in Hand)</p>
-                                        <p className="text-xs font-black text-green-500">KES {ledger.balance.toLocaleString()}</p>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="bg-black p-4 flex justify-between items-center mt-auto border-t border-slate-800">
-                                <p className="text-[10px] font-black uppercase text-slate-500">Total CR</p>
-                                <p className="text-sm font-black text-white">KES {ledger.finalTotal.toLocaleString()}</p>
-                            </div>
-                        </div>
+                     {/* 2. COLUMNS WRAPPER (STACK on Mobile, SPLIT on Desktop) */}
+                     <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-800">
+                         
+                         {/* --- LEFT COLUMN: DR (RECEIPTS) --- */}
+                         <div className="flex-1 flex flex-col">
+                             <div className="p-4 bg-slate-900/50 border-b border-slate-800 text-center">
+                                 <h4 className="text-green-500 font-black text-xs uppercase tracking-widest">DR (Receipts / In)</h4>
+                             </div>
+                             
+                             <div className="p-4 space-y-4 flex-1 min-h-[300px]">
+                                 {/* Map Incoming Transactions */}
+                                 {ledger.drTrans.map((t, i) => (
+                                     <div key={i} className="flex justify-between items-start border-b border-slate-800/50 pb-2">
+                                         <div>
+                                            <span className="block text-[9px] text-slate-500 font-mono">{t.created_at.split('T')[0]}</span>
+                                            <span className="text-[10px] font-black text-slate-200 uppercase">{t.description}</span>
+                                         </div>
+                                         <span className="text-xs font-black text-green-400">KES {t.amount.toLocaleString()}</span>
+                                     </div>
+                                 ))}
+                             </div>
 
-                    </div>
-                </div>
+                             {/* DR FOOTER */}
+                             <div className="bg-black p-6 border-t border-slate-800 flex justify-between items-center">
+                                 <span className="text-xs font-bold text-slate-500 uppercase">Total DR</span>
+                                 <span className="text-xl font-black text-white">KES {ledger.grandTotal.toLocaleString()}</span>
+                             </div>
+                         </div>
+
+                         {/* --- RIGHT COLUMN: CR (PAYMENTS) --- */}
+                         <div className="flex-1 flex flex-col">
+                             <div className="p-4 bg-slate-900/50 border-b border-slate-800 text-center">
+                                 <h4 className="text-red-500 font-black text-xs uppercase tracking-widest">CR (Payments / Out)</h4>
+                             </div>
+
+                             <div className="p-4 space-y-4 flex-1 min-h-[300px]">
+                                 {/* Map Outgoing Transactions */}
+                                 {ledger.crTrans.map((t, i) => (
+                                     <div key={i} className="flex justify-between items-start border-b border-slate-800/50 pb-2">
+                                         <div>
+                                            <span className="block text-[9px] text-slate-500 font-mono">{t.created_at.split('T')[0]}</span>
+                                            <span className="text-[10px] font-black text-slate-200 uppercase">{t.description}</span>
+                                         </div>
+                                         <span className="text-xs font-black text-red-400">KES {Math.abs(t.amount).toLocaleString()}</span>
+                                     </div>
+                                 ))}
+
+                                 {/* --- THE BALANCING FIGURE (CASH IN HAND) --- */}
+                                 {/* We place this on the CR side so the totals match visually */}
+                                 {ledger.balance >= 0 && (
+                                     <div className="flex justify-between items-center py-3 border-t border-dotted border-green-900 mt-8">
+                                         <span className="text-[10px] font-black text-green-500 uppercase italic">Balance c/d (Cash in Hand)</span>
+                                         <span className="text-xs font-black text-green-500">KES {ledger.balance.toLocaleString()}</span>
+                                     </div>
+                                 )}
+                             </div>
+
+                             {/* CR FOOTER */}
+                             <div className="bg-black p-6 border-t border-slate-800 flex justify-between items-center">
+                                 <span className="text-xs font-bold text-slate-500 uppercase">Total CR</span>
+                                 <span className="text-xl font-black text-white">KES {ledger.grandTotal.toLocaleString()}</span>
+                             </div>
+                         </div>
+
+                     </div>
+                 </div>
              </div>
           )}
 
