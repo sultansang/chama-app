@@ -272,6 +272,22 @@ export default function Home() {
     return { drTrans, crTrans, totalDr, totalCr, balance: totalDr - totalCr, grandTotal: Math.max(totalDr, totalCr) };
   }, [transactions, reportMonth]);
 
+  // --- PASTE THIS NEW PROFIT LOGIC HERE ---
+  const profitStats = useMemo(() => {
+    // 1. Calculate Interest from ALL loans (Active + Paid)
+    const totalInterest = loans.reduce((acc, l) => acc + (l.interest_accrued || 0), 0);
+
+    // 2. Calculate Fines (Revenue)
+    const fineTrans = transactions.filter(t => t.type === 'Fine' || t.type === 'Late Penalty');
+    const totalFines = fineTrans.reduce((acc, t) => acc + Math.abs(t.amount), 0);
+
+    return {
+        interest: totalInterest,
+        fines: totalFines,
+        total: totalInterest + totalFines
+    };
+  }, [loans, transactions]);
+
   // --- ACTIONS ---
   const handlePayment = async () => {
     if(!canEdit) return showToast("Permission Denied: Read Only", "error");
@@ -782,15 +798,50 @@ export default function Home() {
           )}
 
           {/* PRESENTATION */}
+         {/* PRESENTATION TAB (UPDATED) */}
           {activeTab === "Presentation" && (
              <div className="space-y-6 animate-in fade-in">
-                 <div className="flex justify-between items-end">
+                 
+                 {/* 1. DIVIDEND & PROFIT DASHBOARD */}
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     <div className="bg-slate-900 p-8 rounded-[2rem] border border-green-900/30 shadow-lg relative overflow-hidden group">
+                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity text-6xl">📈</div>
+                         <p className="text-green-500 text-[10px] font-black uppercase tracking-widest mb-2">Total Dividends Pool</p>
+                         <h3 className="text-3xl font-black text-white">
+                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats.total)}
+                         </h3>
+                         <p className="text-[9px] text-slate-500 mt-2 font-bold uppercase">Available for Sharing</p>
+                     </div>
+
+                     <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 shadow-lg relative overflow-hidden">
+                         <div className="absolute top-0 right-0 p-4 opacity-10 text-6xl">🏦</div>
+                         <p className="text-blue-400 text-[10px] font-black uppercase tracking-widest mb-2">Interest Income</p>
+                         <h3 className="text-2xl font-black text-slate-200">
+                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats.interest)}
+                         </h3>
+                         <p className="text-[9px] text-slate-500 mt-2 font-bold uppercase">From Loan Interests</p>
+                     </div>
+
+                     <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 shadow-lg relative overflow-hidden">
+                         <div className="absolute top-0 right-0 p-4 opacity-10 text-6xl">🚨</div>
+                         <p className="text-red-400 text-[10px] font-black uppercase tracking-widest mb-2">Penalty Revenue</p>
+                         <h3 className="text-2xl font-black text-slate-200">
+                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats.fines)}
+                         </h3>
+                         <p className="text-[9px] text-slate-500 mt-2 font-bold uppercase">From Late Fines</p>
+                     </div>
+                 </div>
+
+                 {/* 2. LEDGER CONTROLS */}
+                 <div className="flex justify-between items-end pt-4 border-t border-slate-800">
                      <div>
                         <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mb-1">Ledger Period:</p>
                         <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="bg-black text-white p-3 rounded-xl text-xs font-bold uppercase border border-slate-700 outline-none focus:border-green-600 transition-colors"/>
                      </div>
                      <button onClick={handleDownloadMonthReport} className="bg-white text-black px-6 py-3 rounded-xl font-black uppercase text-[10px] hover:bg-slate-200 transition-colors">Download Ledger (PDF)</button>
                  </div>
+
+                 {/* 3. LEDGER TABLE */}
                  <div className="bg-black/40 border border-slate-800 rounded-[2.5rem] overflow-hidden backdrop-blur-md shadow-2xl">
                      <div className="bg-slate-900/80 p-8 text-center border-b border-slate-800"><h2 className="text-2xl font-black text-[#006a33] uppercase tracking-widest">General Ledger</h2><p className="text-slate-400 font-mono text-sm mt-1">{reportMonth}</p></div>
                      <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-800">
@@ -813,7 +864,7 @@ export default function Home() {
                  </div>
              </div>
           )}
-
+          
           {/* SETTINGS - ONLY VISIBLE TO CHIEF OR READ ONLY */}
           {activeTab === "Settings" && (
              <div className="flex items-center justify-center h-full animate-in fade-in">
