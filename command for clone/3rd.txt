@@ -1,0 +1,10 @@
+On your new laptop, you must recreate it manually:
+
+In VS Code, right-click the file list and choose "New File".
+
+Name it exactly: .env.local
+
+Paste your keys inside (you need to have these saved somewhere safe, or copy them from your Vercel/Supabase dashboard):
+
+NEXT_PUBLIC_SUPABASE_URL=https://your-url.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-long-secret-key
