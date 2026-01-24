@@ -272,22 +272,78 @@ export default function Home() {
     return { drTrans, crTrans, totalDr, totalCr, balance: totalDr - totalCr, grandTotal: Math.max(totalDr, totalCr) };
   }, [transactions, reportMonth]);
 
-  // --- PASTE THIS NEW PROFIT LOGIC HERE ---
+  // --- UPDATED PROFIT STATS (Net Profit Logic) ---
   const profitStats = useMemo(() => {
-    // 1. Calculate Interest from ALL loans (Active + Paid)
+    // 1. Calculate Total Revenue (Money In from Interest & Fines)
     const totalInterest = loans.reduce((acc, l) => acc + (l.interest_accrued || 0), 0);
-
-    // 2. Calculate Fines (Revenue)
-    const fineTrans = transactions.filter(t => t.type === 'Fine' || t.type === 'Late Penalty');
+    
+    // Find all fines in the ledger
+    const fineTrans = transactions.filter(t => 
+        (t.description || "").includes('Fine') || (t.type === 'Fine')
+    );
     const totalFines = fineTrans.reduce((acc, t) => acc + Math.abs(t.amount), 0);
+
+    // 2. Calculate Expenses (Money Out - Dividends Paid)
+    // We look for any transaction previously marked as a "Dividend Payout"
+    const payoutTrans = transactions.filter(t => 
+        (t.description || "").toLowerCase().includes('dividend payout') || 
+        t.type === 'Dividend'
+    );
+    const totalPaidOut = payoutTrans.reduce((acc, t) => acc + Math.abs(t.amount), 0);
+
+    // 3. The Result is what's LEFT in the pool (Net Available)
+    const grossProfit = totalInterest + totalFines;
+    const netAvailable = grossProfit - totalPaidOut;
 
     return {
         interest: totalInterest,
         fines: totalFines,
-        total: totalInterest + totalFines
+        paidOut: totalPaidOut,
+        total: Math.max(0, netAvailable) // Ensure it never shows negative
     };
   }, [loans, transactions]);
 
+// --- UPDATED DIVIDEND LOGIC (Fixed Variable Names) ---
+  const dividendBreakdown = useMemo(() => {
+    
+    // 1. Calculate Savings for each member dynamically
+    const membersWithSavings = members.map(m => {
+        // Find all "Money In" for this member that is NOT a loan repayment or fine
+        const memberTransactions = transactions.filter(t => 
+            // FIX: We use m.member_name instead of m.name
+            (t.description || "").toUpperCase().includes((m.member_name || "").toUpperCase()) && 
+            t.amount > 0 && // Money coming in
+            !(t.description || "").toLowerCase().includes('loan') && // Exclude Loan Repayments
+            !(t.description || "").toLowerCase().includes('fine')    // Exclude Fines
+        );
+
+        const calculatedSavings = memberTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+        return { ...m, calculated_savings: calculatedSavings };
+    });
+
+    // 2. Get Total Group Savings
+    const totalGroupSavings = membersWithSavings.reduce((sum, m) => sum + m.calculated_savings, 0);
+
+    if (totalGroupSavings === 0) return [];
+
+    // 3. Calculate Shares & Payouts
+    return membersWithSavings.map(m => {
+        const shareRatio = m.calculated_savings / totalGroupSavings; 
+        const payout = shareRatio * profitStats.total; 
+
+        return {
+            id: m.id,
+            name: m.member_name, // FIX: Use member_name here too
+            savings: m.calculated_savings, 
+            ratio: shareRatio * 100,
+            payout: payout
+        };
+    })
+    .filter(m => m.savings > 0) // Only show members who have saved something
+    .sort((a, b) => b.payout - a.payout); 
+
+  }, [members, profitStats, transactions]);
   // --- ACTIONS ---
   const handlePayment = async () => {
     if(!canEdit) return showToast("Permission Denied: Read Only", "error");
@@ -316,6 +372,50 @@ export default function Home() {
         setFineAmount(""); await syncAllData(); showToast("Fine Applied");
     }
     setIsProcessing(false);
+  };
+
+  // --- ACTION: PROCESS DIVIDENDS (CLOSE YEAR) ---
+  const handleProcessDividends = async () => {
+    // Safety Check: Don't run if there is no money
+    if (profitStats.total <= 0) return;
+    if (dividendBreakdown.length === 0) return;
+    
+    // 1. Confirmation Dialog
+    const confirm = window.confirm(
+        `⚠️ END OF YEAR ACTION ⚠️\n\n` +
+        `This will distribute KES ${profitStats.total.toLocaleString()} to ${dividendBreakdown.length} members.\n\n` +
+        `Are you sure you want to close the financial period?`
+    );
+    
+    if (!confirm) return;
+
+    setIsProcessing(true);
+    
+    try {
+        // 2. Create the batch of transactions
+        // We map through the breakdown list and create a "Withdrawal" for each person
+        const payoutPromises = dividendBreakdown.map(member => {
+            return supabase.from('transactions').insert({
+                amount: -member.payout, // Negative because money is LEAVING the account
+                type: 'Dividend',
+                description: `DIVIDEND PAYOUT: ${member.name}`, // Matches the filter
+                created_at: new Date().toISOString()
+            });
+        });
+
+        // 3. Run all inserts at once
+        await Promise.all(payoutPromises);
+        
+        // 4. Refresh to show the new zero balance
+        await syncAllData();
+        alert("✅ Success! Dividends distributed. The pool has been reset for the new year.");
+        
+    } catch (error) {
+        console.error(error);
+        alert("Error processing dividends.");
+    } finally {
+        setIsProcessing(false);
+    }
   };
 
   const initiateLoan = async () => {
@@ -798,41 +898,97 @@ export default function Home() {
           )}
 
           {/* PRESENTATION */}
-         {/* PRESENTATION TAB (UPDATED) */}
+        {/* --- PRESENTATION TAB (WITH DIVIDEND PAYOUTS) --- */}
           {activeTab === "Presentation" && (
              <div className="space-y-6 animate-in fade-in">
                  
-                 {/* 1. DIVIDEND & PROFIT DASHBOARD */}
+                 {/* 1. PROFIT & DIVIDEND CARDS */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     {/* Total Pool */}
                      <div className="bg-slate-900 p-8 rounded-[2rem] border border-green-900/30 shadow-lg relative overflow-hidden group">
                          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity text-6xl">📈</div>
                          <p className="text-green-500 text-[10px] font-black uppercase tracking-widest mb-2">Total Dividends Pool</p>
                          <h3 className="text-3xl font-black text-white">
-                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats.total)}
+                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats?.total || 0)}
                          </h3>
                          <p className="text-[9px] text-slate-500 mt-2 font-bold uppercase">Available for Sharing</p>
                      </div>
 
+                     {/* Interest */}
                      <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 shadow-lg relative overflow-hidden">
                          <div className="absolute top-0 right-0 p-4 opacity-10 text-6xl">🏦</div>
                          <p className="text-blue-400 text-[10px] font-black uppercase tracking-widest mb-2">Interest Income</p>
                          <h3 className="text-2xl font-black text-slate-200">
-                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats.interest)}
+                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats?.interest || 0)}
                          </h3>
                          <p className="text-[9px] text-slate-500 mt-2 font-bold uppercase">From Loan Interests</p>
                      </div>
 
+                     {/* Fines */}
                      <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 shadow-lg relative overflow-hidden">
                          <div className="absolute top-0 right-0 p-4 opacity-10 text-6xl">🚨</div>
                          <p className="text-red-400 text-[10px] font-black uppercase tracking-widest mb-2">Penalty Revenue</p>
                          <h3 className="text-2xl font-black text-slate-200">
-                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats.fines)}
+                             {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(profitStats?.fines || 0)}
                          </h3>
                          <p className="text-[9px] text-slate-500 mt-2 font-bold uppercase">From Late Fines</p>
                      </div>
                  </div>
 
-                 {/* 2. LEDGER CONTROLS */}
+                {/* 2. NEW SECTION: PROJECTED PAYOUTS LIST (With Empty State) */}
+                 <div className="bg-slate-900/50 border border-slate-800 rounded-[2rem] p-6 backdrop-blur-sm">
+                    {/* Header with Smart Action Button */}
+<div className="flex justify-between items-center mb-4">
+    <h4 className="text-white text-xs font-black uppercase tracking-widest flex items-center gap-2">
+        <span>🤝</span> Projected Payouts (Year-End Draft)
+    </h4>
+    
+    {/* Only show "Distribute" button if there is money in the pool */}
+    {profitStats.total > 0 && (
+        <button 
+            onClick={handleProcessDividends}
+            disabled={isProcessing}
+            className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-lg shadow-green-900/20"
+        >
+            {isProcessing ? "Processing..." : "💰 Distribute & Close Year"}
+        </button>
+    )}
+</div>
+                    
+                    {/* CHECK: If the list is empty, show a message instead of blank space */}
+                    {dividendBreakdown.length === 0 ? (
+                        <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl">
+                            <p className="text-3xl mb-2">🤷‍♂️</p>
+                            <p className="text-slate-400 text-sm font-bold">No Savings Data Found</p>
+                            <p className="text-[10px] text-slate-500 mt-1">
+                                Members must have "Savings" recorded to calculate their share percentage.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                            {dividendBreakdown.map((member) => (
+                                <div key={member.id} className="bg-black/40 p-4 rounded-xl border border-slate-800/50 flex justify-between items-center hover:border-green-500/30 transition-colors">
+                                    <div>
+                                        <p className="text-slate-200 font-bold text-sm uppercase">{member.name}</p>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
+                                                {member.ratio.toFixed(1)}% SHARE
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-green-400 font-black text-sm">
+                                            {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(member.payout)}
+                                        </p>
+                                        <p className="text-[9px] text-slate-600 font-bold uppercase">Dividend</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                 </div>
+
+                 {/* 3. LEDGER CONTROLS (Standard) */}
                  <div className="flex justify-between items-end pt-4 border-t border-slate-800">
                      <div>
                         <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mb-1">Ledger Period:</p>
@@ -841,7 +997,7 @@ export default function Home() {
                      <button onClick={handleDownloadMonthReport} className="bg-white text-black px-6 py-3 rounded-xl font-black uppercase text-[10px] hover:bg-slate-200 transition-colors">Download Ledger (PDF)</button>
                  </div>
 
-                 {/* 3. LEDGER TABLE */}
+                 {/* 4. THE GENERAL LEDGER TABLE */}
                  <div className="bg-black/40 border border-slate-800 rounded-[2.5rem] overflow-hidden backdrop-blur-md shadow-2xl">
                      <div className="bg-slate-900/80 p-8 text-center border-b border-slate-800"><h2 className="text-2xl font-black text-[#006a33] uppercase tracking-widest">General Ledger</h2><p className="text-slate-400 font-mono text-sm mt-1">{reportMonth}</p></div>
                      <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-800">
@@ -864,7 +1020,7 @@ export default function Home() {
                  </div>
              </div>
           )}
-          
+
           {/* SETTINGS - ONLY VISIBLE TO CHIEF OR READ ONLY */}
           {activeTab === "Settings" && (
              <div className="flex items-center justify-center h-full animate-in fade-in">
