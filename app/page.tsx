@@ -303,20 +303,46 @@ export default function Home() {
   };
 
   const initiateLoan = async () => {
-    if(!canEdit) return showToast("Permission Denied: Read Only", "error");
+    // SECURITY GATE
+    if(!canEdit) return showToast("ACCESS DENIED: Read Only Mode", "error");
+
     if (!loanMemberId || !loanPrincipal) return showToast("Missing Fields", "error");
-    const borrower = members.find(m => m.id === loanMemberId); 
+    
+    // FIX: We convert both IDs to strings to ensure they match perfectly
+    const borrower = members.find(m => String(m.id) === String(loanMemberId)); 
+    
+    // SAFETY CHECK: If we can't find the name, stop immediately.
+    if (!borrower) return showToast("Error: Could not identify member name", "error");
+
     setIsDisbursing(true);
     const principal = Number(loanPrincipal);
     const interest = principal * (config.loan_interest_rate / 100);
+    const totalDue = principal + interest;
+    
     const dueDate = addMonths(new Date(), Number(loanDuration));
+    
     const { error } = await supabase.from('loans').insert([{
-      member_id: loanMemberId, amount: principal + interest, principal: principal, interest_accrued: interest,
-      status: 'Active', due_date: dueDate.toISOString().split('T')[0], created_at: new Date().toISOString()
+      member_id: loanMemberId, 
+      amount: totalDue, 
+      principal: principal, 
+      interest_accrued: interest,
+      status: 'Active', 
+      due_date: dueDate.toISOString().split('T')[0], 
+      created_at: new Date().toISOString()
     }]);
+    
     if (!error) {
-      await supabase.from('transactions').insert([{ amount: -principal, type: 'Loan Issuance', description: `Disbursed to ${borrower?.member_name}` }]);
-      setLoanPrincipal(""); await syncAllData(); showToast(`Loan disbursed`);
+      // NOW SECURE: We use the 'borrower' variable we found above
+      await supabase.from('transactions').insert([{ 
+          amount: -principal, 
+          type: 'Loan Issuance', 
+          description: `Disbursed to ${borrower.member_name}` 
+      }]);
+      setLoanPrincipal(""); 
+      await syncAllData(); 
+      showToast(`Loan Disbursed to ${borrower.member_name}`);
+    } else {
+        showToast("Database Error during Loan", "error");
     }
     setIsDisbursing(false);
   };
