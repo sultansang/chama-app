@@ -32,11 +32,9 @@ interface Loan {
 
 interface Transaction {
   id: string;
-  member_id: string;
   amount: number;
   type: string;
   description: string;
-  status: string;    // 👈 ADD THIS LINE
   created_at: string;
 }
 
@@ -75,141 +73,77 @@ const [newMemberName, setNewMemberName] = useState("");
 // --- 🗓️ NEW: MEETINGS LOGIC ---
   const [meetings, setMeetings] = useState<any[]>([]);
   
- // --- 📥 FETCH MEETINGS (Keep this one!) ---
-  const fetchMeetings = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('meetings')
-        .select('*')
-        .order('date', { ascending: false });
+  // 1. Fetch meetings from database
+  const fetchMeetings = useCallback(async () => {
+    const { data } = await supabase.from('meetings').select('*').order('date', { ascending: false });
+    if (data) setMeetings(data);
+  }, []);
 
-      if (error) throw error;
-      setMeetings(data || []);
-    } catch (error) {
-      console.error('Error fetching meetings:', error);
+  // 2. Start a new meeting
+  const handleStartMeeting = async () => {
+    const date = window.prompt("Enter Meeting Date (YYYY-MM-DD):", new Date().toISOString().split('T')[0]);
+    if (!date) return;
+    const { error } = await supabase.from('meetings').insert([{ date, topic: 'Monthly Meeting', created_at: new Date().toISOString() }]);
+    if (error) alert(error.message);
+    else {
+      await fetchMeetings(); 
+      alert("Meeting Created!");
     }
   };
   // --- STEP 1: OPEN REGISTER FUNCTION ---
   const [activeMeeting, setActiveMeeting] = useState<any>(null);
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
 
-  // --- 📝 OPEN REGISTER (Fixed) ---
   const openRegister = (meeting: any) => {
       setActiveMeeting(meeting);
-      
-      // Check if we already saved attendance for this meeting
-      if (meeting.attendance_data) {
-          // If yes, LOAD the saved data
-          setAttendanceList(meeting.attendance_data);
-      } else {
-          // If no, create a fresh list
-          setAttendanceList(members.map(m => ({
-              id: m.id,
-              name: m.member_name,
-              status: 'Present' 
-          })));
-      }
+      // Create a list of all members, defaulting to 'Present'
+      setAttendanceList(members.map(m => ({
+          id: m.id,
+          name: m.member_name,
+          status: 'Present' 
+      })));
   };
+
   // --- STEP 2: SAVE ATTENDANCE FUNCTION ---
-  
-// --- 💾 SAVE ATTENDANCE (FIXED: Removes 'id' and 'title' to prevent errors) ---
   const handleSaveAttendance = async () => {
       if(!activeMeeting) return;
-      const confirm = window.confirm("⚠️ This will save the register and record fines.\n\nProceed?");
+      
+      const confirm = window.confirm("⚠️ This will record fines for Late/Absent members.\n\nProceed?");
       if (!confirm) return;
 
       setIsProcessing(true);
       const fines = [];
-      
-      // 1. Loop through list to find fines
+
       for (const record of attendanceList) {
           let fineAmount = 0;
-          if (record.status === 'Late') fineAmount = 50;
+          
+          // --- FINE AMOUNTS ---
+          if (record.status === 'Late') fineAmount = 50; 
           if (record.status === 'Absent') fineAmount = 100;
 
           if (fineAmount > 0) {
+              // Create a Debt Record (Does NOT touch savings)
               fines.push({
-                  member_id: record.id,
-                  amount: 0,            
+                  amount: -fineAmount, 
                   type: 'Fine',
-                  status: 'Unpaid',     
-                  description: `Fine Owed: ${record.status} (${fineAmount} KES)`, 
+                  description: `Outstanding Fine: ${record.status} - ${record.name}`, 
                   created_at: new Date().toISOString()
               });
           }
       }
 
-      // 2. Save Fines (If any)
       if (fines.length > 0) {
           await supabase.from('transactions').insert(fines);
-      }
-
-      // 3. Save the Register State
-      let meetingError;
-
-      if (activeMeeting.id === 'new') {
-          // CASE A: NEW MEETING
-          // 🛑 FIX: We remove 'id' AND 'title' so Supabase doesn't complain
-          const { id, title, ...meetingData } = activeMeeting; 
-          
-          const { error } = await supabase
-            .from('meetings')
-            .insert([{ 
-                ...meetingData, 
-                attendance_data: attendanceList, 
-                status: 'Completed' 
-            }]);
-          meetingError = error;
+          alert(`Recorded ${fines.length} fines successfully!`);
       } else {
-          // CASE B: EXISTING MEETING (Update)
-          const { error } = await supabase
-            .from('meetings')
-            .update({ attendance_data: attendanceList, status: 'Completed' }) 
-            .eq('id', activeMeeting.id);
-          meetingError = error;
+          alert("Attendance Saved (No fines to record)");
       }
 
-      if (meetingError) {
-        alert("Error saving register: " + meetingError.message);
-      } else {
-        alert("Register Saved & Fines Recorded!");
-        setActiveMeeting(null); // Close the modal on success
-      }
-
-      // 4. Refresh Data
-      fetchMeetings();
-      fetchTransactions(); 
+      await syncAllData(); 
       setIsProcessing(false);
+      setActiveMeeting(null); 
   };
-// --- 💸 CLEAR FINE FUNCTION ---
-  const handleClearFine = async (transaction: any) => {
-    // Extract the number (e.g., 100) from the description string
-    const amountMatch = transaction.description.match(/\d+/);
-    const fineAmount = amountMatch ? parseInt(amountMatch[0]) : 0;
 
-    if (!window.confirm(`Confirm payment of ${fineAmount} KES for "${transaction.description}"?`)) return;
-
-    setIsProcessing(true);
-    
-    // Update the transaction: Change status to Paid and set the actual amount
-    const { error } = await supabase
-      .from('transactions')
-      .update({ 
-        status: 'Paid',
-        amount: fineAmount, // This adds it to your total liquidity
-        created_at: new Date().toISOString() 
-      })
-      .eq('id', transaction.id);
-
-    if (error) {
-      alert("Error: " + error.message);
-    } else {
-      fetchTransactions(); // Refresh the list to show it's paid
-    }
-    setIsProcessing(false);
-  };
-  // --- STEP 2: SAVE ATTENDANCE FUNCTION ---
-  
   // 3. Auto-load meetings when tab is opened
   useEffect(() => {
      if (activeTab === "Meetings") fetchMeetings();
@@ -231,17 +165,6 @@ const [newMemberName, setNewMemberName] = useState("");
   const [isDisbursing, setIsDisbursing] = useState(false); 
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  // --- 🔄 HELPER: FETCH TRANSACTIONS ---
-  const fetchTransactions = async () => {
-      const { data, error } = await supabase
-          .from('transactions')
-          .select('*')
-          .order('created_at', { ascending: false });
-      
-      if (data) {
-          setTransactions(data);
-      }
-  };
   
   // --- NOTIFICATIONS ---
   const [toasts, setToasts] = useState<{ id: number, msg: string, type: 'success' | 'error' }[]>([]);
@@ -429,33 +352,26 @@ const [newMemberName, setNewMemberName] = useState("");
     return { drTrans, crTrans, totalDr, totalCr, balance: totalDr - totalCr, grandTotal: Math.max(totalDr, totalCr) };
   }, [transactions, reportMonth]);
 
-  // --- UPDATED PROFIT STATS ---
+  // --- UPDATED PROFIT STATS (Net Profit Logic) ---
   const profitStats = useMemo(() => {
-    // 1. Calculate Interest
+    // 1. Calculate Total Revenue (Money In from Interest & Fines)
     const totalInterest = loans.reduce((acc, l) => acc + (l.interest_accrued || 0), 0);
     
-    // 2. Filter Fines
+    // Find all fines in the ledger
     const fineTrans = transactions.filter(t => 
         (t.description || "").includes('Fine') || (t.type === 'Fine')
     );
+    const totalFines = fineTrans.reduce((acc, t) => acc + Math.abs(t.amount), 0);
 
-    // 3. Logic to read amounts from "Fine Owed: (50 KES)"
-    const totalFines = fineTrans.reduce((acc, t) => {
-        if (t.amount === 0 && (t.description || "").includes('KES')) {
-            const match = t.description.match(/\((\d+)\s*KES\)/i);
-            const owedAmount = match ? parseInt(match[1]) : 0;
-            return acc + owedAmount;
-        }
-        return acc + Math.abs(t.amount);
-    }, 0);
-
-    // 4. Calculate Payouts
+    // 2. Calculate Expenses (Money Out - Dividends Paid)
+    // We look for any transaction previously marked as a "Dividend Payout"
     const payoutTrans = transactions.filter(t => 
         (t.description || "").toLowerCase().includes('dividend payout') || 
         t.type === 'Dividend'
     );
     const totalPaidOut = payoutTrans.reduce((acc, t) => acc + Math.abs(t.amount), 0);
 
+    // 3. The Result is what's LEFT in the pool (Net Available)
     const grossProfit = totalInterest + totalFines;
     const netAvailable = grossProfit - totalPaidOut;
 
@@ -463,7 +379,7 @@ const [newMemberName, setNewMemberName] = useState("");
         interest: totalInterest,
         fines: totalFines,
         paidOut: totalPaidOut,
-        total: Math.max(0, netAvailable)
+        total: Math.max(0, netAvailable) // Ensure it never shows negative
     };
   }, [loans, transactions]);
 
@@ -843,34 +759,27 @@ const [newMemberName, setNewMemberName] = useState("");
                                      {fin.netBalance > 0 ? '(+) ' : ''}{new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(fin.netBalance)}
                                  </span>
                              </div>
-                            {(() => {
-    // 1. Calculate Total (Finds 'Late', 'Absent', and 'Fine')
-    const unpaidFinesTotal = transactions
-        .filter(t => 
-            t.member_id === selectedMember?.id && 
-            (t.type === 'Fine' || t.description.toLowerCase().includes('late') || t.description.toLowerCase().includes('absent')) &&
-            t.status !== 'Paid'
-        )
-        .reduce((sum, t) => {
-            const match = t.description.match(/\d+/);
-            const amt = match ? parseInt(match[0]) : Math.abs(t.amount);
-            return sum + amt;
-        }, 0);
+                             {/* --- 🛑 NEW: OUTSTANDING FINES CARD --- */}
+                     {/* --- 🛑 OUTSTANDING FINES CARD (CORRECTED) --- */}
+                     {(() => {
+                        // 1. Calculate Debt: Fines (negative) + Repayments (positive)
+                        const fineDebt = transactions
+                            .filter(t => (t.type === 'Fine' || t.type === 'Fine Repayment') && t.description.includes(selectedMember.member_name))
+                            .reduce((sum, t) => sum + t.amount, 0);
 
-    return (
-        <div className={`px-4 py-2 rounded-xl border transition-all ${unpaidFinesTotal > 0 ? 'bg-rose-950/40 border-rose-500/50 animate-pulse' : 'bg-slate-800 border-slate-700'}`}>
-            <span className={`text-[9px] uppercase block tracking-wider font-bold ${unpaidFinesTotal > 0 ? 'text-rose-500' : 'text-slate-400'}`}>
-                {unpaidFinesTotal > 0 ? '⚠️ Fines Owed' : 'Fines Owed'}
-            </span>
-            
-            {/* ⬇️ THIS IS THE MISSING LINE THAT FIXES THE EMPTY BOX ⬇️ */}
-            <span className={`text-xl font-black block ${unpaidFinesTotal > 0 ? 'text-rose-500' : 'text-white'}`}>
-                {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(unpaidFinesTotal)}
-            </span>
-        </div>
-    );
-})()}
-                     
+                        // 2. Only show if the result is still negative (meaning they still owe money)
+                        // using -1 to handle tiny math decimals safely
+                        if (fineDebt < -1) {
+                            return (
+                                <div className="px-4 py-2 bg-red-950/40 rounded-xl border border-red-500/30 flex flex-col justify-center min-w-[120px] animate-in fade-in zoom-in">
+                                    <span className="text-[9px] uppercase text-red-400 block tracking-wider font-bold">Outstanding Fines</span>
+                                    <span className="text-xl font-black text-red-500">
+                                        KES {Math.abs(fineDebt).toLocaleString()}
+                                    </span>
+                                </div>
+                            );
+                        }
+                     })()}
                              <div className="px-4 py-2 bg-slate-800 rounded-xl border border-slate-700">
                                  <span className="text-[9px] uppercase text-slate-400 block tracking-wider">Gross Paid</span>
                                  <span className="text-xl font-black text-white">{new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(fin.totalPaid)}</span>
@@ -1145,7 +1054,7 @@ const handleRepayLoan = async (loanId: any) => {
                     <p className="text-slate-400 text-sm">Manage attendance, fines, and minutes.</p>
                  </div>
                  <button 
-                   onClick={() => openRegister({ id: 'new', title: 'New Meeting', date: new Date().toISOString() })} 
+                   onClick={handleStartMeeting} 
                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-3 rounded-xl font-black shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all active:scale-95"
                  >
                    <span>+</span> NEW MEETING
@@ -1157,12 +1066,7 @@ const handleRepayLoan = async (loanId: any) => {
                 {meetings.length === 0 ? (
                    <div className="p-12 text-center border-2 border-dashed border-slate-800 rounded-3xl bg-slate-900/50">
                      <p className="text-slate-500 font-bold uppercase tracking-widest">No meetings recorded yet.</p>
-                     <button 
-    onClick={() => openRegister({ id: 'new', title: 'New Meeting', date: new Date().toISOString() })}
-    className="bg-[#006a33] hover:bg-green-600 text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-green-900/20 transition-all hover:scale-105 flex items-center gap-2"
->
-    <span>+</span> Start New Meeting
-</button>
+                     <button onClick={handleStartMeeting} className="text-emerald-500 font-bold text-sm mt-2 hover:underline">Start the first one</button>
                    </div>
                 ) : (
                   meetings.map((m) => (
@@ -1513,76 +1417,58 @@ const handleRepayLoan = async (loanId: any) => {
         </div>
       </div>
       {/* --- 📝 REGISTER POPUP WINDOW --- */}
-      {/* --- 📝 NEW SMART MODAL --- */}
       {activeMeeting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            
-            {/* Header */}
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
-              <div>
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                   📝 {activeMeeting.title || 'Attendance Register'}
-                </h3>
-                <p className="text-slate-400 text-xs mt-1">
-                   Mark attendance. Fines are calculated automatically.
-                </p>
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+           <div className="bg-slate-900 w-full max-w-2xl rounded-[2rem] border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+              
+              {/* Header */}
+              <div className="p-6 border-b border-slate-800 bg-slate-950 flex justify-between items-center shrink-0">
+                  <div>
+                    <h3 className="text-white text-xl font-black uppercase">Roll Call</h3>
+                    <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">{activeMeeting.date}</p>
+                  </div>
+                  <button onClick={() => setActiveMeeting(null)} className="h-10 w-10 bg-slate-800 rounded-full text-white hover:bg-red-600 transition-colors">✕</button>
               </div>
-              <button 
-                onClick={() => setActiveMeeting(null)}
-                className="text-slate-500 hover:text-white transition-colors"
-              >
-                ✕ Close
-              </button>
-            </div>
 
-            {/* List of Members */}
-            <div className="p-6 overflow-y-auto flex-1 space-y-3 custom-scrollbar">
-              {attendanceList.map((record, index) => (
-                <div key={record.id} className="flex items-center justify-between bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 hover:border-emerald-500/30 transition-all">
-                  
-                  <div className="flex items-center gap-4">
-                    <span className="text-slate-500 font-mono text-xs">{(index + 1).toString().padStart(2, '0')}</span>
-                    <span className="font-bold text-white">{record.name}</span>
-                  </div>
+              {/* List of Members */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-3">
+                 {attendanceList.map((record, idx) => (
+                    <div key={record.id} className="flex flex-col sm:flex-row sm:items-center justify-between bg-black/20 p-4 rounded-xl border border-slate-800 gap-4">
+                        <span className="text-white font-bold">{idx + 1}. {record.name}</span>
+                        <div className="flex bg-slate-950 rounded-lg p-1 border border-slate-800">
+                           {['Present', 'Late', 'Absent', 'Apology'].map((status) => (
+                              <button 
+                                key={status}
+                                onClick={() => {
+                                   const newList = [...attendanceList];
+                                   newList[idx].status = status;
+                                   setAttendanceList(newList);
+                                }}
+                                className={`px-3 py-2 rounded-md text-[10px] font-black uppercase transition-all ${
+                                  record.status === status 
+                                  ? (status === 'Present' ? 'bg-green-600 text-white' : status === 'Apology' ? 'bg-blue-600 text-white' : 'bg-red-600 text-white')
+                                  : 'text-slate-500 hover:text-white'
+                                }`}
+                              >
+                                {status}
+                              </button>
+                           ))}
+                        </div>
+                    </div>
+                 ))}
+              </div>
 
-                  {/* Buttons: Present / Late / Absent */}
-                  <div className="flex bg-slate-950 rounded-lg p-1 border border-slate-800">
-                    {['Present', 'Late', 'Absent'].map((status) => (
-                      <button
-                        key={status}
-                        onClick={() => {
-                          const newList = [...attendanceList];
-                          newList[index].status = status;
-                          setAttendanceList(newList);
-                        }}
-                        className={`px-4 py-2 rounded-md text-[10px] uppercase font-bold tracking-wider transition-all ${
-                          record.status === status
-                            ? status === 'Present' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                            : status === 'Late' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
-                            : 'bg-rose-500 text-white shadow-lg shadow-rose-500/20'
-                            : 'text-slate-500 hover:text-slate-300'
-                        }`}
-                      >
-                        {status}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Footer Save Button */}
-            <div className="p-6 border-t border-slate-800 bg-slate-950/50 flex justify-end">
-              <button 
-                onClick={handleSaveAttendance}
-                disabled={isProcessing}
-                className="bg-emerald-500 hover:bg-emerald-400 text-black px-8 py-3 rounded-xl font-bold uppercase text-xs tracking-widest shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center gap-2"
-              >
-                {isProcessing ? '💾 Saving...' : '💾 Save & Record Fines'}
-              </button>
-            </div>
-          </div>
+              {/* Save Button */}
+              <div className="p-6 border-t border-slate-800 bg-slate-950 shrink-0">
+                 <button 
+                    onClick={handleSaveAttendance}
+                    disabled={isProcessing}
+                    className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-widest rounded-xl transition-all shadow-lg"
+                 >
+                    {isProcessing ? "Processing..." : "💾 Save Register & Record Fines"}
+                 </button>
+              </div>
+           </div>
         </div>
       )}
     </main>
